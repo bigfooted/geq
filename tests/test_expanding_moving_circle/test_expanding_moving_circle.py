@@ -1,3 +1,8 @@
+import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 """
 Test case for 2D G-equation solver: expanding circle in uniform flow.
 This tests the case with constant velocity: u = (0.1, 0)
@@ -6,66 +11,20 @@ Updated to use local reinitialization by default and compute flame surface area.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from g_equation_solver_improved import (GEquationSolver2D, initial_solution, 
+from g_equation_solver_improved import (GEquationSolver2D, initial_solution,
                                 compute_circle_radius, compute_circle_center,
                                 analytical_radius, analytical_center)
 from plotting_utils import (plot_contours_comparison, plot_radius_and_center_combined,
                             plot_trajectory, plot_surface_3d)
+from contour_utils import compute_contour_length
 import time
-
-
-def compute_flame_surface_area(G, dx, dy):
-    """
-    Compute the flame surface area (length of G=0 contour in 2D).
-    Uses linear interpolation to find zero crossings and sum segment lengths.
-    
-    Parameters:
-    -----------
-    G : ndarray
-        Level set function
-    dx : float
-        Grid spacing in x
-    dy : float
-        Grid spacing in y
-        
-    Returns:
-    --------
-    surface_area : float
-        Total length of the G=0 contour
-    """
-    ny, nx = G.shape
-    surface_area = 0.0
-    
-    # Count zero crossings in x-direction (horizontal edges)
-    for j in range(ny):
-        for i in range(nx-1):
-            G1 = G[j, i]
-            G2 = G[j, i+1]
-            
-            if G1 * G2 < 0:  # Zero crossing detected
-                # Segment length (horizontal edge)
-                segment_length = dx
-                surface_area += segment_length
-    
-    # Count zero crossings in y-direction (vertical edges)
-    for j in range(ny-1):
-        for i in range(nx):
-            G1 = G[j, i]
-            G2 = G[j+1, i]
-            
-            if G1 * G2 < 0:  # Zero crossing detected
-                # Segment length (vertical edge)
-                segment_length = dy
-                surface_area += segment_length
-    
-    return surface_area
 
 
 def analytical_surface_area(t, R0, S_L):
     """
     Analytical flame surface area for a circle.
     Surface area (2D) = circumference = 2π R(t)
-    
+
     Parameters:
     -----------
     t : float or ndarray
@@ -74,7 +33,7 @@ def analytical_surface_area(t, R0, S_L):
         Initial radius
     S_L : float
         Laminar flame speed
-        
+
     Returns:
     --------
     area : float or ndarray
@@ -88,7 +47,7 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
     """
     Test the G-equation solver with an expanding circle in uniform flow.
     Compares numerical solution with analytical solution.
-    
+
     Parameters:
     -----------
     t_final : float
@@ -99,7 +58,7 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
         Use local reinitialization every 50 steps (default: True)
     verbose : bool
         Print detailed output (default: True)
-        
+
     Returns:
     --------
     radius_error : ndarray
@@ -111,32 +70,32 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
     elapsed_time : float
         Computation time in seconds
     """
-    
+
     # Parameters
     nx = 101  # Number of grid points in x
     ny = 101  # Number of grid points in y
     Lx = 2.0  # Domain length in x
     Ly = 2.0  # Domain length in y
     S_L = 0.2  # Laminar flame speed
-    
+
     # Flow velocity (constant uniform flow)
     u_x = 0.1
     u_y = 0.0
-    
+
     # Circle parameters
     x_center_0 = 0.5  # Initial center x-coordinate
     y_center_0 = 1.0  # Initial center y-coordinate
     R0 = 0.3  # Initial radius
-    
+
     # Time parameters
     dt = 0.001  # Time step (CFL condition)
     save_interval = 50  # Save solution every 50 steps for speed
-    
+
     # Reinitialization parameters
     reinit_interval = 50 if use_reinit else 0
     reinit_method = 'fast_marching'
     reinit_local = True  # Use local (narrow-band) reinitialization
-    
+
     if verbose:
         print("="*60)
         print(f"2D G-Equation Solver: Expanding Moving Circle Test")
@@ -156,21 +115,22 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
         print(f"Final time t_final = {t_final}")
         print(f"Save interval: every {save_interval} steps")
         print("="*60)
-    
+
     # Create solver
     solver = GEquationSolver2D(nx, ny, Lx, Ly, S_L, u_x=u_x, u_y=u_y)
-    
+
     # Create initial condition
     G_initial = initial_solution(solver.X, solver.Y, x_center_0, y_center_0, R0)
-    
+
     # Verify initial radius, center, and surface area
-    initial_radius = compute_circle_radius(G_initial, solver.X, solver.Y, 
+    initial_radius = compute_circle_radius(G_initial, solver.X, solver.Y,
                                           x_center_0, y_center_0, solver.dx, solver.dy)
     initial_x_center, initial_y_center = compute_circle_center(G_initial, solver.X, solver.Y,
                                                                solver.dx, solver.dy)
-    initial_area = compute_flame_surface_area(G_initial, solver.dx, solver.dy)
+    # Use robust contour length instead of grid-edge counting
+    initial_area = compute_contour_length(G_initial, solver.X, solver.Y, iso_value=0.0)
     analytical_initial_area = analytical_surface_area(0.0, R0, S_L)
-    
+
     if verbose:
         print(f"\nInitial verification:")
         print(f"  Expected R0 = {R0:.6f}, Computed R0 = {initial_radius:.6f}")
@@ -180,13 +140,13 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
         print(f"  Analytical = {analytical_initial_area:.6f}")
         print(f"  Computed   = {initial_area:.6f}")
         print(f"  Error      = {abs(initial_area - analytical_initial_area):.6f}")
-    
+
     # Solve
     if verbose:
         print("\nSolving G-equation...")
     start_time = time.time()
     G_history, t_history = solver.solve(
-        G_initial, t_final, dt, 
+        G_initial, t_final, dt,
         save_interval=save_interval,
         time_scheme=time_scheme,
         reinit_interval=reinit_interval,
@@ -195,13 +155,13 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
-    
+
     n_total_steps = int(t_final / dt)
     if verbose:
         print(f"Completed {n_total_steps} time steps in {elapsed_time:.2f} seconds.")
         print(f"Saved {len(t_history)} snapshots.")
         print(f"Average time per step: {elapsed_time/n_total_steps*1000:.3f} ms")
-    
+
     # Extract numerical radius, center, and surface area at each time step
     if verbose:
         print("\nExtracting flame radius, center, and surface area...")
@@ -209,124 +169,138 @@ def test_expanding_moving_circle(t_final=1.5, time_scheme='euler', use_reinit=Tr
     numerical_x_centers = []
     numerical_y_centers = []
     numerical_areas = []
-    
+
     for G in G_history:
         # Compute center first
         x_c, y_c = compute_circle_center(G, solver.X, solver.Y, solver.dx, solver.dy)
         numerical_x_centers.append(x_c)
         numerical_y_centers.append(y_c)
-        
+
         # Compute radius using computed center
         radius = compute_circle_radius(G, solver.X, solver.Y, x_c, y_c,
                                       solver.dx, solver.dy)
         numerical_radii.append(radius)
-        
-        # Compute surface area
-        area = compute_flame_surface_area(G, solver.dx, solver.dy)
+
+        # Compute surface area using isocontour length
+        area = compute_contour_length(G, solver.X, solver.Y, iso_value=0.0)
         numerical_areas.append(area)
-    
+
     # Compute analytical solution
     t_array = np.array(t_history)
     analytical_radii = analytical_radius(t_array, R0, S_L)
-    analytical_x_centers, analytical_y_centers = analytical_center(t_array, x_center_0, y_center_0, 
+    analytical_x_centers, analytical_y_centers = analytical_center(t_array, x_center_0, y_center_0,
                                                                    u_x, u_y)
     analytical_areas = analytical_surface_area(t_array, R0, S_L)
-    
+
     # Compute errors
     radius_error = np.abs(np.array(numerical_radii) - analytical_radii)
     x_center_error = np.abs(np.array(numerical_x_centers) - analytical_x_centers)
     y_center_error = np.abs(np.array(numerical_y_centers) - analytical_y_centers)
     area_error = np.abs(np.array(numerical_areas) - analytical_areas)
     relative_area_error = area_error / analytical_areas * 100
-    
+
     if verbose:
         print(f"\nRadius errors:")
         print(f"  Maximum absolute error: {np.max(radius_error):.6f}")
         print(f"  Mean absolute error: {np.mean(radius_error):.6f}")
-        
+
         print(f"\nCenter position errors:")
         print(f"  Maximum x-error: {np.max(x_center_error):.6f}")
         print(f"  Maximum y-error: {np.max(y_center_error):.6f}")
         print(f"  Mean x-error: {np.mean(x_center_error):.6f}")
         print(f"  Mean y-error: {np.mean(y_center_error):.6f}")
-        
+
         print(f"\nFlame surface area errors:")
         print(f"  Maximum absolute error: {np.max(area_error):.6f}")
         print(f"  Maximum relative error: {np.max(relative_area_error):.2f}%")
         print(f"  Mean absolute error: {np.mean(area_error):.6f}")
         print(f"  Mean relative error: {np.mean(relative_area_error):.2f}%")
-    
+
     # Visualization (only if verbose)
     if verbose:
         print("\nCreating visualizations...")
-        
+
         suffix = f"_reinit" if use_reinit else "_no_reinit"
-        
+
         # Plot 1: Contour plots at selected times
         plot_contours_comparison(solver, G_history, t_history, R0, S_L,
                                 x_center_0=x_center_0, y_center_0=y_center_0,
                                 u_x=u_x, u_y=u_y,
                                 numerical_centers=(numerical_x_centers, numerical_y_centers),
                                 filename=f'contour_plots_moving_{time_scheme}_t{t_final}{suffix}.png')
-        
+
         # Plot 2: Radius and center position vs time (combined)
         plot_radius_and_center_combined(t_history, numerical_radii, analytical_radii,
                                        numerical_x_centers, numerical_y_centers,
                                        analytical_x_centers, analytical_y_centers,
                                        filename=f'radius_center_comparison_moving_{time_scheme}_t{t_final}{suffix}.png')
-        
+
         # Plot 3: Surface area comparison
         fig_area, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-        
+
         # Surface area comparison
         ax1.plot(t_history, numerical_areas, 'b-', linewidth=2, label='Numerical')
         ax1.plot(t_history, analytical_areas, 'r--', linewidth=2, label='Analytical')
         ax1.set_xlabel('Time (s)', fontsize=12)
         ax1.set_ylabel('Flame Surface Area', fontsize=12)
-        ax1.set_title(f'Flame Surface Area vs Time (With Flow)', fontsize=14, fontweight='bold')
+        ax1.set_title('Flame Surface Area vs Time (With Flow)', fontsize=14, fontweight='bold')
         ax1.legend(fontsize=12)
         ax1.grid(True, alpha=0.3)
-        
+
         # Area error plot
         ax2.plot(t_history, area_error, 'k-', linewidth=2)
         ax2.set_xlabel('Time (s)', fontsize=12)
         ax2.set_ylabel('Absolute Error', fontsize=12)
         ax2.set_title('Error in Flame Surface Area', fontsize=14, fontweight='bold')
         ax2.grid(True, alpha=0.3)
-        
+
         plt.tight_layout()
-        plt.savefig(f'surface_area_comparison_moving_{time_scheme}_t{t_final}{suffix}.png',
-                   dpi=300, bbox_inches='tight')
-        print(f"Saved: surface_area_comparison_moving_{time_scheme}_t{t_final}{suffix}.png")
-        
+        plt.savefig(
+            f'surface_area_comparison_moving_{time_scheme}_t{t_final}{suffix}.png',
+            dpi=300, bbox_inches='tight'
+        )
+        print(
+            f"Saved: surface_area_comparison_moving_{time_scheme}_t{t_final}{suffix}.png"
+        )
+
         # Plot 4: Trajectory in x-y plane
-        plot_trajectory(numerical_x_centers, numerical_y_centers,
-                       analytical_x_centers, analytical_y_centers,
-                       x_center_0, y_center_0,
-                       filename=f'trajectory_moving_{time_scheme}_t{t_final}{suffix}.png')
-        
+        plot_trajectory(
+            numerical_x_centers,
+            numerical_y_centers,
+            analytical_x_centers,
+            analytical_y_centers,
+            x_center_0,
+            y_center_0,
+            filename=f'trajectory_moving_{time_scheme}_t{t_final}{suffix}.png'
+        )
+
         # Plot 5: 3D surface plot at final time
         G_final = G_history[-1]
-        plot_surface_3d(solver, G_final, t_final, with_flow=True,
-                       filename=f'surface_plot_moving_{time_scheme}_t{t_final}{suffix}.png')
-        
+        plot_surface_3d(
+            solver,
+            G_final,
+            t_final,
+            with_flow=True,
+            filename=f'surface_plot_moving_{time_scheme}_t{t_final}{suffix}.png'
+        )
+
         plt.show()
-        
-        print("\n" + "="*60)
+
+        print("\n" + "=" * 60)
         print("Test completed successfully!")
-        print("="*60)
-    
+        print("=" * 60)
+
     return radius_error, x_center_error, y_center_error, elapsed_time
 
 
 if __name__ == "__main__":
     import sys
-    
+
     # Default parameters
     scheme = 'euler'
     t_final = 1.5
     use_reinit = True
-    
+
     # Parse command-line arguments
     for arg in sys.argv[1:]:
         if arg.lower() in ['euler', 'rk2']:
@@ -335,7 +309,7 @@ if __name__ == "__main__":
             t_final = float(arg.split('=')[1])
         elif arg == 'no_reinit':
             use_reinit = False
-    
+
     print(f"\nRunning with: t_final={t_final}, scheme={scheme}, use_reinit={use_reinit}\n")
-    
+
     test_expanding_moving_circle(t_final=t_final, time_scheme=scheme, use_reinit=use_reinit, verbose=True)

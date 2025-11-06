@@ -1,3 +1,8 @@
+import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 """
 Test and compare different reinitialization methods.
 Compares global vs local (narrow-band) reinitialization.
@@ -7,6 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from g_equation_solver_improved import (GEquationSolver2D, compute_circle_radius,
                                         analytical_radius)
+from reporting_utils import (banner, sub_banner, print_performance, print_completion)
 import time
 
 
@@ -21,17 +27,15 @@ def initial_solution_sharp(X, Y, x_center, y_center, radius):
 def test_reinitialization_methods(t_final=2.0):
     """
     Compare different reinitialization approaches including global vs local.
-    
+
     Parameters:
     -----------
     t_final : float
         Final simulation time
     """
-    print("\n" + "="*80)
-    print("TESTING REINITIALIZATION METHODS: GLOBAL vs LOCAL")
-    print(f"Simulation time: t_final = {t_final} seconds")
-    print("="*80 + "\n")
-    
+    banner("TESTING REINITIALIZATION METHODS: GLOBAL vs LOCAL")
+    print(f"Simulation time: t_final = {t_final} seconds\n")
+
     # Parameters
     nx, ny = 101, 101
     Lx, Ly = 2.0, 2.0
@@ -41,63 +45,62 @@ def test_reinitialization_methods(t_final=2.0):
     R0 = 0.3
     dt = 0.001
     save_interval = 50
-    
+
     # Test configurations
     configs = [
-        {'reinit': 0, 'method': 'none', 'local': True, 'smooth': False, 
+        {'reinit': 0, 'method': 'none', 'local': True, 'smooth': False,
          'label': 'No Reinit'},
-        {'reinit': 0, 'method': 'none', 'local': True, 'smooth': True, 
+        {'reinit': 0, 'method': 'none', 'local': True, 'smooth': True,
          'label': 'Smooth IC Only'},
-        {'reinit': 100, 'method': 'fast_marching', 'local': False, 'smooth': False, 
+        {'reinit': 100, 'method': 'fast_marching', 'local': False, 'smooth': False,
          'label': 'Fast March GLOBAL (every 100)'},
-        {'reinit': 100, 'method': 'fast_marching', 'local': True, 'smooth': False, 
+        {'reinit': 100, 'method': 'fast_marching', 'local': True, 'smooth': False,
          'label': 'Fast March LOCAL (every 100)'},
-        {'reinit': 50, 'method': 'fast_marching', 'local': False, 'smooth': False, 
+        {'reinit': 50, 'method': 'fast_marching', 'local': False, 'smooth': False,
          'label': 'Fast March GLOBAL (every 50)'},
-        {'reinit': 50, 'method': 'fast_marching', 'local': True, 'smooth': False, 
+        {'reinit': 50, 'method': 'fast_marching', 'local': True, 'smooth': False,
          'label': 'Fast March LOCAL (every 50)'},
-        {'reinit': 100, 'method': 'pde', 'local': False, 'smooth': False, 
+        {'reinit': 100, 'method': 'pde', 'local': False, 'smooth': False,
          'label': 'PDE GLOBAL (every 100)'},
-        {'reinit': 100, 'method': 'pde', 'local': True, 'smooth': False, 
+        {'reinit': 100, 'method': 'pde', 'local': True, 'smooth': False,
          'label': 'PDE LOCAL (every 100)'},
-        {'reinit': 50, 'method': 'fast_marching', 'local': True, 'smooth': True, 
+        {'reinit': 50, 'method': 'fast_marching', 'local': True, 'smooth': True,
          'label': 'Fast March LOCAL + Smooth IC'},
     ]
-    
+
     results = []
-    
+
     for i, config in enumerate(configs):
-        print(f"\n{'='*80}")
-        print(f"Test {i+1}/{len(configs)}: {config['label']}")
-        print(f"{'='*80}")
-        
+        sub_banner(f"Test {i+1}/{len(configs)}: {config['label']}")
+
         solver = GEquationSolver2D(nx, ny, Lx, Ly, S_L, u_x=u_x, u_y=u_y)
         G_initial = initial_solution_sharp(solver.X, solver.Y, x_center, y_center, R0)
-        
+
         start_time = time.time()
+        method_arg = config['method'] if config['reinit'] > 0 else 'fast_marching'
         G_history, t_history = solver.solve(
             G_initial, t_final, dt,
             save_interval=save_interval,
             time_scheme='rk2',
             reinit_interval=config['reinit'],
-            reinit_method=config['method'],
+            reinit_method=method_arg,
             reinit_local=config['local'],
             smooth_ic=config['smooth']
         )
         elapsed = time.time() - start_time
-        
+
         # Extract radii
         numerical_radii = []
         for G in G_history:
             radius = compute_circle_radius(G, solver.X, solver.Y, x_center, y_center,
                                           solver.dx, solver.dy)
             numerical_radii.append(radius)
-        
+
         # Compute errors
         t_array = np.array(t_history)
         analytical_radii = analytical_radius(t_array, R0, S_L)
         error = np.abs(np.array(numerical_radii) - analytical_radii)
-        
+
         results.append({
             'config': config,
             'error': error,
@@ -108,103 +111,99 @@ def test_reinitialization_methods(t_final=2.0):
             'mean_error': np.mean(error),
             'final_error': error[-1]
         })
-        
+
         print(f"   Max Error: {np.max(error):.6f}")
         print(f"   Mean Error: {np.mean(error):.6f}")
         print(f"   Final Error: {error[-1]:.6f}")
-        print(f"   Time: {elapsed:.2f} s")
-    
+        print_performance(elapsed, int(t_final/dt), len(t_history))
+
     # Plotting
-    print("\n" + "="*80)
-    print("CREATING COMPARISON PLOTS")
-    print("="*80)
-    
+    sub_banner("CREATING COMPARISON PLOTS")
+
     colors = plt.cm.tab20(np.linspace(0, 1, len(results)))
-    
+
     # Plot 1: Error evolution
     fig1, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
+
     for i, result in enumerate(results):
         t_points = result['t_history']
         linestyle = '--' if 'GLOBAL' in result['config']['label'] else '-'
         linewidth = 2.5 if 'LOCAL' in result['config']['label'] else 2.0
-        
+
         ax1.plot(t_points, result['error'], label=result['config']['label'],
                 color=colors[i], linewidth=linewidth, linestyle=linestyle,
                 marker='o', markersize=3, markevery=5)
         ax2.semilogy(t_points, result['error'] + 1e-10, label=result['config']['label'],
                     color=colors[i], linewidth=linewidth, linestyle=linestyle,
                     marker='o', markersize=3, markevery=5)
-    
+
     ax1.set_xlabel('Time (s)', fontsize=12)
     ax1.set_ylabel('Absolute Error', fontsize=12)
-    ax1.set_title(f'Error Evolution - Linear Scale (t_final={t_final}s)\nSolid=LOCAL, Dashed=GLOBAL', 
+    ax1.set_title(f'Error Evolution - Linear Scale (t_final={t_final}s)\nSolid=LOCAL, Dashed=GLOBAL',
                  fontsize=12, fontweight='bold')
     ax1.legend(fontsize=8, loc='best', ncol=2)
     ax1.grid(True, alpha=0.3)
-    
+
     ax2.set_xlabel('Time (s)', fontsize=12)
     ax2.set_ylabel('Absolute Error (log scale)', fontsize=12)
-    ax2.set_title(f'Error Evolution - Log Scale (t_final={t_final}s)\nSolid=LOCAL, Dashed=GLOBAL', 
+    ax2.set_title(f'Error Evolution - Log Scale (t_final={t_final}s)\nSolid=LOCAL, Dashed=GLOBAL',
                  fontsize=12, fontweight='bold')
     ax2.legend(fontsize=8, loc='best', ncol=2)
     ax2.grid(True, alpha=0.3, which='both')
-    
+
     plt.tight_layout()
     plt.savefig(f'reinitialization_global_vs_local_error_t{t_final}.png', dpi=300, bbox_inches='tight')
     print(f"Saved: reinitialization_global_vs_local_error_t{t_final}.png")
-    
+
     # Plot 2: Summary statistics
     fig2, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-    
+
     labels = [r['config']['label'] for r in results]
     max_errors = [r['max_error'] for r in results]
     mean_errors = [r['mean_error'] for r in results]
     final_errors = [r['final_error'] for r in results]
     comp_times = [r['elapsed'] for r in results]
-    
+
     x = np.arange(len(labels))
-    
+
     # Color bars by type
-    bar_colors = ['red' if 'GLOBAL' in label else 'green' if 'LOCAL' in label else 'gray' 
+    bar_colors = ['red' if 'GLOBAL' in label else 'green' if 'LOCAL' in label else 'gray'
                   for label in labels]
-    
+
     ax1.bar(x, max_errors, color=bar_colors, alpha=0.7)
     ax1.set_ylabel('Max Error', fontsize=11)
     ax1.set_title('Maximum Absolute Error (Green=LOCAL, Red=GLOBAL)', fontsize=11, fontweight='bold')
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
     ax1.grid(True, alpha=0.3, axis='y')
-    
+
     ax2.bar(x, mean_errors, color=bar_colors, alpha=0.7)
     ax2.set_ylabel('Mean Error', fontsize=11)
     ax2.set_title('Mean Absolute Error', fontsize=11, fontweight='bold')
     ax2.set_xticks(x)
     ax2.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
     ax2.grid(True, alpha=0.3, axis='y')
-    
+
     ax3.bar(x, final_errors, color=bar_colors, alpha=0.7)
     ax3.set_ylabel('Final Error', fontsize=11)
     ax3.set_title(f'Error at t={t_final}s', fontsize=11, fontweight='bold')
     ax3.set_xticks(x)
     ax3.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
     ax3.grid(True, alpha=0.3, axis='y')
-    
+
     ax4.bar(x, comp_times, color=bar_colors, alpha=0.7)
     ax4.set_ylabel('Time (s)', fontsize=11)
     ax4.set_title('Computation Time', fontsize=11, fontweight='bold')
     ax4.set_xticks(x)
     ax4.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
     ax4.grid(True, alpha=0.3, axis='y')
-    
+
     plt.tight_layout()
     plt.savefig(f'reinitialization_global_vs_local_stats_t{t_final}.png', dpi=300, bbox_inches='tight')
     print(f"Saved: reinitialization_global_vs_local_stats_t{t_final}.png")
-    
+
     # Print summary
-    print("\n" + "="*80)
-    print(f"SUMMARY TABLE (t_final = {t_final} s)")
-    print("="*80)
+    sub_banner(f"SUMMARY TABLE (t_final = {t_final} s)")
     print(f"{'Method':<40} {'Max Err':<12} {'Mean Err':<12} {'Final Err':<12} {'Time (s)':<10}")
     print("-"*80)
     for r in results:
@@ -213,12 +212,10 @@ def test_reinitialization_methods(t_final=2.0):
               f"{r['mean_error']:<12.6f} "
               f"{r['final_error']:<12.6f} "
               f"{r['elapsed']:<10.2f}")
-    
+
     # Compare global vs local directly
-    print("\n" + "="*80)
-    print("DIRECT COMPARISON: GLOBAL vs LOCAL")
-    print("="*80)
-    
+    sub_banner("DIRECT COMPARISON: GLOBAL vs LOCAL")
+
     # Find matching pairs
     for i, r1 in enumerate(results):
         if 'GLOBAL' in r1['config']['label']:
@@ -231,10 +228,8 @@ def test_reinitialization_methods(t_final=2.0):
                     print(f"{r2['config']['label']}")
                     print(f"  Error improvement: {r1['max_error']/r2['max_error']:.2f}x")
                     print(f"  Speed ratio: {r2['elapsed']/r1['elapsed']:.2f}x (LOCAL/GLOBAL)")
-    
-    print("\n" + "="*80)
-    print("KEY FINDINGS:")
-    print("="*80)
+
+    sub_banner("KEY FINDINGS:")
     print("• LOCAL (narrow-band) reinitialization is DEFAULT and RECOMMENDED")
     print("• LOCAL is typically faster than GLOBAL (only processes interface region)")
     print("• LOCAL preserves far-field values better than GLOBAL")
@@ -244,21 +239,23 @@ def test_reinitialization_methods(t_final=2.0):
     print("• Best approach: LOCAL Fast Marching every 50-100 steps + Smooth IC")
     print("• GLOBAL reinitialization provided for comparison purposes only")
     print("="*80 + "\n")
-    
+
+    print_completion("Reinitialization tests completed!")
+
     plt.show()
-    
+
     return results
 
 
 if __name__ == "__main__":
     import sys
-    
+
     t_final = 2.0
     for arg in sys.argv[1:]:
         if arg.startswith('t=') or arg.startswith('time='):
             t_final = float(arg.split('=')[1])
-    
+
     print("\nNOTE: Testing both GLOBAL and LOCAL (narrow-band) reinitialization")
     print("      LOCAL is the default and recommended approach\n")
-    
+
     test_reinitialization_methods(t_final=t_final)
