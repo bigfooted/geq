@@ -141,7 +141,9 @@ def compute_ftf(
         raise ValueError("Unsupported window. Use 'hann' or None")
 
     # Complex projection at omega0
-    exp_vec = np.exp(-1j * omega0 * ts)
+    # Using exp(+i*omega*t) convention to match theoretical FTF formulas
+    # (Schuller-Durox-Candel convention: positive phase = flame response lags velocity)
+    exp_vec = np.exp(1j * omega0 * ts)
     U_hat = np.sum(uus * w * exp_vec)
     A_hat = np.sum(aus * w * exp_vec)
 

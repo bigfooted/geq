@@ -40,6 +40,8 @@ class CheckpointMeta:
     reinit_local: Optional[bool] = None
     save_interval: Optional[int] = None
     notes: Optional[str] = None
+    # Extra free-form metadata for exact restarts (e.g., velocity forcing parameters)
+    extra: Optional[Dict[str, Any]] = None
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__)

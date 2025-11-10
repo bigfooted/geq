@@ -48,10 +48,11 @@ def create_three_region_updater(X, Y, x1=0.1, x2=0.9, U_Y=0.2, A=0.05, St=12.566
     return updater
 
 def test_ftf_linear_flame_nonhom(
-    time_scheme='rk2', use_reinit=True, verbose=True,
+    time_scheme='rk2', use_reinit=False, verbose=True,
     N=3, f_min_hz=50.0, f_max_hz=500.0,
     steps_per_period=20, drop_cycles=500, measure_cycles=10,
     plot_start_t: float = 10.0,
+    compare_reinit: bool = False,
 ):
     """Run FTF sweeps for N frequencies between f_min_hz and f_max_hz and plot gain/phase.
 
@@ -140,7 +141,8 @@ def test_ftf_linear_flame_nonhom(
             save_interval=save_interval,
             time_scheme=time_scheme,
             reinit_interval=(50 if use_reinit else 0),
-            reinit_method='fast_marching',
+            # Prevent auto-reinit when disabled
+            reinit_method=('fast_marching' if use_reinit else 'none'),
             reinit_local=True,
             velocity_updater=velocity_updater,
         )
@@ -149,10 +151,11 @@ def test_ftf_linear_flame_nonhom(
             print_performance(elapsed, int(np.ceil(t_final/dt)), len(t_hist))
 
         # Signals
+        print("computing flame lengths...")
         flame_lengths = [compute_contour_length(G, solver.X, solver.Y, iso_value=0.0) for G in G_hist]
         t_arr = np.array(t_hist)
         u_ref = u_y_mid * (1.0 + A * np.sin(omega * (t_arr - K * 0.0)))
-
+        print("computing FTF...")
         # FTF at this frequency
         ftf = compute_ftf(
             area=np.array(flame_lengths),
@@ -168,8 +171,66 @@ def test_ftf_linear_flame_nonhom(
         gains.append(float(ftf['gain'][0]))
         phases.append(float(ftf['phase'][0]))
 
+        # Optional comparison: run the same setup with reinit disabled for the measurement window
+        # to check if contour-length jumps disappear (diagnostic for reinit artifacts).
+        if compare_reinit and idx == 0:
+            if verbose:
+                print("\n-- Re-running first frequency with reinitialization disabled (diagnostic) --")
+            # Split into transient (with reinit) + measurement (no reinit)
+            # Transient run (no saving):
+            T_win = T
+            t_transient = drop_cycles * T_win
+            Gt, tt = solver.solve(
+                G0, t_transient, dt,
+                save_interval=int(1e9),  # effectively no snapshots
+                time_scheme=time_scheme,
+                reinit_interval=(50 if use_reinit else 0),
+                reinit_method=('fast_marching' if use_reinit else 'none'),
+                reinit_local=True,
+                velocity_updater=velocity_updater,
+            )
+            # Measurement run: start from last transient state, no reinit, decimate saves
+            G_init_meas = Gt[-1]
+            t0 = tt[-1]
+            t_meas_final = t0 + measure_cycles * T_win
+            save_interval_meas = max(1, int(steps_per_period // 8))  # ~8 samples/period
+            Gm, tm = solver.solve(
+                G_init_meas, t_meas_final, dt,
+                save_interval=save_interval_meas,
+                time_scheme=time_scheme,
+                reinit_interval=0,  # disable
+                reinit_method='none',
+                reinit_local=True,
+                velocity_updater=velocity_updater,
+                t0=t0,
+            )
+            # Signals for comparison
+            flame_lengths_m = [compute_contour_length(G, solver.X, solver.Y, iso_value=0.0) for G in Gm]
+            t_arr_m = np.array(tm)
+            u_ref_m = u_y_mid * (1.0 + A * np.sin(omega * (t_arr_m - K * 0.0)))
+            # Save a comparison plot around the measurement window
+            try:
+                fig_cmp, axl = plt.subplots(1, 1, figsize=(9, 4))
+                axr = axl.twinx()
+                ln1 = axl.plot(t_arr, flame_lengths, 'k-', alpha=0.4, label='|Γ| (with reinit)')
+                ln1b = axl.plot(t_arr_m, flame_lengths_m, 'g-', linewidth=1.6, label='|Γ| (no reinit, meas)')
+                ln2 = axr.plot(t_arr, u_ref, 'b--', alpha=0.4, label='u_ref (with reinit)')
+                ln2b = axr.plot(t_arr_m, u_ref_m, 'c--', linewidth=1.2, label='u_ref (no reinit, meas)')
+                axl.set_xlabel('Time (s)'); axl.set_ylabel('Flame length |Γ|'); axr.set_ylabel('u_y (m/s)')
+                axl.grid(True, alpha=0.3)
+                lines = ln1 + ln1b + ln2 + ln2b
+                labels = [l.get_label() for l in lines]
+                axl.legend(lines, labels, loc='best')
+                axl.set_title(f'50 Hz diagnostic: reinit vs no-reinit (measurement window)')
+                fig_cmp.tight_layout()
+                fig_cmp.savefig('ftf_50Hz_reinit_compare.png', dpi=300, bbox_inches='tight')
+                plt.close(fig_cmp)
+            except Exception:
+                pass
+
         # Per-frequency time plot: flame area and forcing velocity (from plot_start_t),
         # with a vertical line marking the start of the steady-state window
+        print("generating time history plot...")
         try:
             T_win = T
             t_start_win = t_arr[0] + drop_cycles * T_win
@@ -209,7 +270,7 @@ def test_ftf_linear_flame_nonhom(
 
     gains = np.array(gains)
     phases = np.array(phases)
-
+    print("plot FTF curves...")
     # Plot FTF curves
     plot_ftf_bode(freqs, gains, phases,
                   title='FTF Bode: Linear Flame (Three-Region)',
@@ -234,10 +295,43 @@ if __name__ == "__main__":
     import sys
     scheme = 'rk2'
     use_reinit = True
+    compare_reinit = False
+    # Optional overrides: N=, fmin=, fmax=, compare_reinit
     for arg in sys.argv[1:]:
         if arg.lower() in ['euler', 'rk2']:
             scheme = arg.lower()
         elif arg == 'no_reinit':
             use_reinit = False
-    print(f"\nRunning FTF sweep with: scheme={scheme}, use_reinit={use_reinit}\n")
-    test_ftf_linear_flame_nonhom(time_scheme=scheme, use_reinit=use_reinit, verbose=True)
+        elif arg.startswith('N='):
+            try:
+                N = int(arg.split('=')[1])
+            except Exception:
+                pass
+        elif arg.startswith('fmin='):
+            try:
+                fmin = float(arg.split('=')[1])
+            except Exception:
+                pass
+        elif arg.startswith('fmax='):
+            try:
+                fmax = float(arg.split('=')[1])
+            except Exception:
+                pass
+        elif arg.lower() == 'compare_reinit':
+            compare_reinit = True
+    print(f"\nRunning FTF sweep with: scheme={scheme}, use_reinit={use_reinit}, compare_reinit={compare_reinit}\n")
+    # Default N/f range if not overridden
+    try:
+        N
+    except NameError:
+        N = 3
+    try:
+        fmin
+    except NameError:
+        fmin = 50.0
+    try:
+        fmax
+    except NameError:
+        fmax = 500.0
+    test_ftf_linear_flame_nonhom(time_scheme=scheme, use_reinit=use_reinit, verbose=True,
+                                 N=N, f_min_hz=fmin, f_max_hz=fmax, compare_reinit=compare_reinit)

@@ -198,14 +198,19 @@ def test_restart_linear_flame_nonhom(t_extend=2.0, time_scheme='rk2', use_reinit
         fname_pos = f'restart_linear_flame_nonhom_position_{time_scheme}_t{t_hist[0]:.2f}_to_{t_hist[-1]:.2f}.png'
         plt.savefig(fname_pos, dpi=300, bbox_inches='tight')
 
-        # Flame length vs time during restart
-        flame_lengths = [compute_contour_length(Gk, solver0.X, solver0.Y, iso_value=0.0) for Gk in G_hist]
+        # Flame length vs time during restart (with spatial and temporal skipping markers)
+        spatial_skip_N = 5  # use every Nth grid point for approximate length
+        flame_lengths = [compute_contour_length(Gk, solver0.X, solver0.Y, iso_value=0.0, N=spatial_skip_N) for Gk in G_hist]
+        time_skip_N = 5     # mark every Nth saved time
+        marked_indices = list(range(0, len(t_hist), time_skip_N))
         fig3, ax3 = plt.subplots(1, 1, figsize=(7, 5))
-        ax3.plot(t_hist, flame_lengths, 'k-', linewidth=2)
+        ax3.plot(t_hist, flame_lengths, 'k-', linewidth=1.8, label='|Γ| (approx, skip N=5)')
+        ax3.plot(np.array(t_hist)[marked_indices], np.array(flame_lengths)[marked_indices], 'ro', markersize=4, label=f'sampled times (every {time_skip_N})')
         ax3.set_xlabel('Time (s)'); ax3.set_ylabel('Flame Length |Γ|'); ax3.grid(True, alpha=0.3)
-        ax3.set_title('Flame Length during Restart')
+        ax3.set_title('Flame Length during Restart (spatial skip + markers)')
+        ax3.legend(loc='best')
         plt.tight_layout()
-        fname_len = f'restart_linear_flame_nonhom_length_{time_scheme}_t{t_hist[0]:.2f}_to_{t_hist[-1]:.2f}.png'
+        fname_len = f'restart_linear_flame_nonhom_length_{time_scheme}_t{t_hist[0]:.2f}_to_{t_hist[-1]:.2f}_skipN{spatial_skip_N}.png'
         plt.savefig(fname_len, dpi=300, bbox_inches='tight')
 
         if verbose:
